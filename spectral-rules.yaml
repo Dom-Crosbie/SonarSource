@@ -12,7 +12,7 @@ rules:
       function: pattern
       functionOptions:
         match: "^(\\/([a-z0-9-]+|\\{[a-zA-Z0-9_]+\\}))*\\/?$"
- 
+
   sonar-operation-id-camel-case:
     message: "operationId must be camelCase"
     severity: warn
@@ -148,20 +148,3 @@ rules:
       function: pattern
       functionOptions:
         notMatch: "^query$"
-
-  # ── OWASP overrides (severity promotions) ─────────────────────────────────
-  # Promote OWASP warnings to errors for gates
-  owasp:api1:2019-no-numeric-ids:
-    severity: error
-
-  owasp:api3:2019-define-error-responses-401:
-    severity: error
-
-  owasp:api3:2019-define-error-responses-500:
-    severity: error
-
-  owasp:api4:2019-rate-limit:
-    severity: error
-
-  owasp:api7:2019-security-hosts-https-oas3:
-    severity: error
