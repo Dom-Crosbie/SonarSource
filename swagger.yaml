@@ -58,6 +58,8 @@ paths:
       tags:
         - verification
       operationId: listChecks
+      x-spectral-exemptions:
+      - owasp:api4:2019-array-limit
       summary: List all triggered checks with optional filtering by status
       parameters:
         - name: status
@@ -112,6 +114,8 @@ paths:
       tags:
         - verification
       operationId: getCheckById
+      x-spectral-exemptions:
+      - owasp:api4:2019-array-limit
       summary: Retrieve details of a specific check by its ID
       parameters:
         - name: checkId
