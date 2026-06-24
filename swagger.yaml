@@ -1,8 +1,8 @@
 openapi: "3.0.0"
 info:
   title: SonarDemo API
-  description: API for SonarDemo, a code verification software that triggers checks of Pull Requests based on Git SHAs.
-  version: 1.3.1
+  description: API for SonarDemo, to prove exemptions.
+  version: '1.4'
 servers:
   - description: SwaggerHub API Auto Mocking
     url: https://virtserver.swaggerhub.com/domcrosbie-cc0/SonarDemo/1.3
