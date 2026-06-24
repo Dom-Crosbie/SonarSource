@@ -1,12 +1,11 @@
 # SonarDemo Spectral ruleset
-# Demo-focused: inherit the full OWASP ruleset but turn EVERY rule OFF,
-# then re-enable ONLY owasp:api4:2019-array-limit as an error.
-# This makes the exemption toggle the single thing that decides pass/fail.
+# Demo-focused: only owasp:api4:2019-array-limit is enforced.
+# Everything else explicitly off so the exemption is the only pass/fail switch.
 
 extends:
   - - "https://unpkg.com/@stoplight/spectral-owasp-ruleset@^1.4.2/dist/ruleset.mjs"
     - "off"
 
 rules:
-  # The one rule the demo toggles via x-spectral-exemptions
   owasp:api4:2019-array-limit: error
+  owasp:api4:2019-rate-limit: "off"
