@@ -20,8 +20,6 @@ paths:
         - verification
       operationId: triggerCheck
       summary: Trigger a code verification check for a Pull Request based on Git SHA
-      x-spectral-exemptions:
-        - owasp:api4:2019-array-limit
       requestBody:
         required: true
         content:
