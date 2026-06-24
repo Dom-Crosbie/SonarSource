@@ -5,9 +5,9 @@ on:
     branches:
       - sonar-demo
     paths:
-      - 'node-output/DemoTest.yaml'
+      - 'swagger.yaml'
       - 'spectral-rules.yaml'
-      - 'filter-spectral-results.js'
+      - 'generate-spectral-overrides.js'
       - '.github/workflows/trigger-jenkins-sonar-demo.yml'
 
   workflow_dispatch:
@@ -15,7 +15,7 @@ on:
       spec_path:
         description: 'Path to the OpenAPI spec file'
         required: false
-        default: 'node-output/DemoTest.yaml'
+        default: 'swagger.yaml'
       spectral_fail_on_severity:
         description: 'Fail gate on this severity level (error|warn|info|hint)'
         required: false
@@ -31,13 +31,11 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      JENKINS_JOB_NAME: SonarDemo-Spectral
-      # Use workflow_dispatch input if provided, otherwise fall back to default
-      SPEC_PATH:                    ${{ github.event.inputs.spec_path || 'node-output/DemoTest.yaml' }}
-      BASE_BRANCH:                  main
-      COMPARE_BRANCH:               sonar-demo
-      SPECTRAL_FAIL_ON_SEVERITY:    ${{ github.event.inputs.spectral_fail_on_severity || 'error' }}
-      # Ruleset lives in the same repo; raw URL is built dynamically in the step below
+      JENKINS_JOB_NAME: SonarDeploy
+      SPEC_PATH:                     ${{ github.event.inputs.spec_path || 'swagger.yaml' }}
+      BASE_BRANCH:                   main
+      COMPARE_BRANCH:                sonar-demo
+      SPECTRAL_FAIL_ON_SEVERITY:     ${{ github.event.inputs.spectral_fail_on_severity || 'error' }}
       SPECTRAL_RULESET_URL_OVERRIDE: ${{ github.event.inputs.spectral_ruleset_url }}
 
     steps:
@@ -57,7 +55,6 @@ jobs:
           else
             echo "url=https://raw.githubusercontent.com/${{ github.repository }}/main/spectral-rules.yaml" >> "$GITHUB_OUTPUT"
           fi
-          echo "Spectral ruleset: $(cat $GITHUB_OUTPUT | grep url | cut -d= -f2)"
 
       - name: Trigger Jenkins — Spectral governance check
         run: |
@@ -76,14 +73,14 @@ jobs:
           CRUMB_VALUE="$(echo "$CRUMB_JSON" | jq -r '.crumb')"
 
           echo "Triggering Jenkins job: $JENKINS_JOB_NAME"
-          echo "  Repository:    ${{ github.repository }}"
-          echo "  Ref:           ${{ github.ref }}"
-          echo "  SHA:           ${{ github.sha }}"
-          echo "  Spec path:     $SPEC_PATH"
-          echo "  Base branch:   $BASE_BRANCH"
-          echo "  Compare branch:$COMPARE_BRANCH"
-          echo "  Ruleset URL:   ${{ steps.ruleset.outputs.url }}"
-          echo "  Fail on:       $SPECTRAL_FAIL_ON_SEVERITY"
+          echo "  Repository:     ${{ github.repository }}"
+          echo "  Ref:            ${{ github.ref }}"
+          echo "  SHA:            ${{ github.sha }}"
+          echo "  Spec path:      $SPEC_PATH"
+          echo "  Base branch:    $BASE_BRANCH"
+          echo "  Compare branch: $COMPARE_BRANCH"
+          echo "  Ruleset URL:    ${{ steps.ruleset.outputs.url }}"
+          echo "  Fail on:        $SPECTRAL_FAIL_ON_SEVERITY"
 
           HTTP_STATUS="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
             --user "$JENKINS_USER:$JENKINS_API_TOKEN" \
