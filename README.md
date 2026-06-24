@@ -1,4 +1,4 @@
 # SonarSource
 
 
-Demo branch
+Demo branch for Spectral Exemptions
