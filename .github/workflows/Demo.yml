@@ -1,0 +1,109 @@
+name: SonarDemo — Spectral governance check
+
+on:
+  push:
+    branches:
+      - sonar-demo
+    paths:
+      - 'node-output/DemoTest.yaml'
+      - 'spectral-rules.yaml'
+      - 'filter-spectral-results.js'
+      - '.github/workflows/trigger-jenkins-sonar-demo.yml'
+
+  workflow_dispatch:
+    inputs:
+      spec_path:
+        description: 'Path to the OpenAPI spec file'
+        required: false
+        default: 'node-output/DemoTest.yaml'
+      spectral_fail_on_severity:
+        description: 'Fail gate on this severity level (error|warn|info|hint)'
+        required: false
+        default: 'error'
+      spectral_ruleset_url:
+        description: 'Override URL for the Spectral ruleset (leave blank to use repo default)'
+        required: false
+        default: ''
+
+jobs:
+  spectral-governance:
+    name: Spectral governance gate
+    runs-on: ubuntu-latest
+
+    env:
+      JENKINS_JOB_NAME: SonarDemo-Spectral
+      # Use workflow_dispatch input if provided, otherwise fall back to default
+      SPEC_PATH:                    ${{ github.event.inputs.spec_path || 'node-output/DemoTest.yaml' }}
+      BASE_BRANCH:                  main
+      COMPARE_BRANCH:               sonar-demo
+      SPECTRAL_FAIL_ON_SEVERITY:    ${{ github.event.inputs.spectral_fail_on_severity || 'error' }}
+      # Ruleset lives in the same repo; raw URL is built dynamically in the step below
+      SPECTRAL_RULESET_URL_OVERRIDE: ${{ github.event.inputs.spectral_ruleset_url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify OpenAPI spec exists
+        run: |
+          test -f "$SPEC_PATH"
+          echo "Found spec: $SPEC_PATH"
+
+      - name: Resolve Spectral ruleset URL
+        id: ruleset
+        run: |
+          if [ -n "$SPECTRAL_RULESET_URL_OVERRIDE" ]; then
+            echo "url=$SPECTRAL_RULESET_URL_OVERRIDE" >> "$GITHUB_OUTPUT"
+          else
+            echo "url=https://raw.githubusercontent.com/${{ github.repository }}/main/spectral-rules.yaml" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Spectral ruleset: $(cat $GITHUB_OUTPUT | grep url | cut -d= -f2)"
+
+      - name: Trigger Jenkins — Spectral governance check
+        run: |
+          set -euo pipefail
+
+          JENKINS_URL="${{ secrets.JENKINS_URL }}"
+          JENKINS_USER="${{ secrets.JENKINS_USER }}"
+          JENKINS_API_TOKEN="${{ secrets.JENKINS_API_TOKEN }}"
+          JOB_URL="$JENKINS_URL/job/$JENKINS_JOB_NAME"
+
+          echo "Getting Jenkins crumb..."
+          CRUMB_JSON="$(curl -sS \
+            --user "$JENKINS_USER:$JENKINS_API_TOKEN" \
+            "$JENKINS_URL/crumbIssuer/api/json")"
+          CRUMB_FIELD="$(echo "$CRUMB_JSON" | jq -r '.crumbRequestField')"
+          CRUMB_VALUE="$(echo "$CRUMB_JSON" | jq -r '.crumb')"
+
+          echo "Triggering Jenkins job: $JENKINS_JOB_NAME"
+          echo "  Repository:    ${{ github.repository }}"
+          echo "  Ref:           ${{ github.ref }}"
+          echo "  SHA:           ${{ github.sha }}"
+          echo "  Spec path:     $SPEC_PATH"
+          echo "  Base branch:   $BASE_BRANCH"
+          echo "  Compare branch:$COMPARE_BRANCH"
+          echo "  Ruleset URL:   ${{ steps.ruleset.outputs.url }}"
+          echo "  Fail on:       $SPECTRAL_FAIL_ON_SEVERITY"
+
+          HTTP_STATUS="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+            --user "$JENKINS_USER:$JENKINS_API_TOKEN" \
+            -H "$CRUMB_FIELD: $CRUMB_VALUE" \
+            "$JOB_URL/buildWithParameters" \
+            --data-urlencode "GITHUB_REPOSITORY=${{ github.repository }}" \
+            --data-urlencode "GITHUB_REF=${{ github.ref }}" \
+            --data-urlencode "GITHUB_SHA=${{ github.sha }}" \
+            --data-urlencode "SPEC_PATH=$SPEC_PATH" \
+            --data-urlencode "BASE_BRANCH=$BASE_BRANCH" \
+            --data-urlencode "COMPARE_BRANCH=$COMPARE_BRANCH" \
+            --data-urlencode "SWAGGER_OWNER=${{ secrets.SWAGGER_OWNER }}" \
+            --data-urlencode "SWAGGER_API_NAME=${{ secrets.SWAGGER_API_NAME }}" \
+            --data-urlencode "SPECTRAL_RULESET_URL=${{ steps.ruleset.outputs.url }}" \
+            --data-urlencode "SPECTRAL_FAIL_ON_SEVERITY=$SPECTRAL_FAIL_ON_SEVERITY")"
+
+          echo "Jenkins HTTP response: $HTTP_STATUS"
+          if [[ "$HTTP_STATUS" != "201" && "$HTTP_STATUS" != "200" ]]; then
+            echo "ERROR: Jenkins did not accept the build trigger (HTTP $HTTP_STATUS)."
+            exit 1
+          fi
+
+          echo "Jenkins job triggered successfully."
