@@ -12,7 +12,7 @@ rules:
       function: pattern
       functionOptions:
         match: "^(\\/([a-z0-9-]+|\\{[a-zA-Z0-9_]+\\}))*\\/?$"
-
+ 
   sonar-operation-id-camel-case:
     message: "operationId must be camelCase"
     severity: warn
