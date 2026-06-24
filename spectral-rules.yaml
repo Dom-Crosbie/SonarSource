@@ -1,288 +1,167 @@
-@echo off
-setlocal enabledelayedexpansion
+extends:
+  - spectral:oas
+  - https://unpkg.com/@stoplight/spectral-owasp-ruleset@^1.4.2/dist/ruleset.mjs
 
-echo ===================== SonarDemo Jenkins Pipeline =====================
-echo GITHUB_REPOSITORY=%GITHUB_REPOSITORY%
-echo GITHUB_REF=%GITHUB_REF%
-echo GITHUB_SHA=%GITHUB_SHA%
-echo SPEC_PATH=%SPEC_PATH%
-echo BASE_BRANCH=%BASE_BRANCH%
-echo COMPARE_BRANCH=%COMPARE_BRANCH%
-echo SWAGGER_OWNER=%SWAGGER_OWNER%
-echo SWAGGER_API_NAME=%SWAGGER_API_NAME%
-echo SPECTRAL_RULESET_URL=%SPECTRAL_RULESET_URL%
-echo SPECTRAL_FAIL_ON_SEVERITY=%SPECTRAL_FAIL_ON_SEVERITY%
-echo WORKSPACE=%WORKSPACE%
-echo ======================================================================
+rules:
+  # ── Naming & Structure ────────────────────────────────────────────────────
+  sonar-path-kebab-case:
+    message: "Path segments must use kebab-case (e.g. /tyre-centre, not /tyreCentre)"
+    severity: error
+    given: "$.paths"
+    then:
+      function: pattern
+      functionOptions:
+        match: "^(\\/([a-z0-9-]+|\\{[a-zA-Z0-9_]+\\}))*\\/?$"
 
-set "PATH=C:\Program Files\nodejs;%PATH%"
+  sonar-operation-id-camel-case:
+    message: "operationId must be camelCase"
+    severity: warn
+    given: "$.paths[*][get,post,put,patch,delete,head,options,trace]"
+    then:
+      field: operationId
+      function: pattern
+      functionOptions:
+        match: "^[a-z][a-zA-Z0-9]*$"
 
-REM -- Required parameter checks -----------------------------------------------
-if "%GITHUB_REPOSITORY%"=="" (
-  echo ERROR: GITHUB_REPOSITORY is required.
-  exit /b 1
-)
-if "%SPEC_PATH%"=="" (
-  echo ERROR: SPEC_PATH is required.
-  exit /b 1
-)
-if "%SWAGGER_OWNER%"=="" (
-  echo ERROR: SWAGGER_OWNER is required.
-  exit /b 1
-)
-if "%SWAGGER_API_NAME%"=="" (
-  echo ERROR: SWAGGER_API_NAME is required.
-  exit /b 1
-)
-if "%SWAGGERHUB_API_KEY%"=="" (
-  echo ERROR: SWAGGERHUB_API_KEY is required.
-  exit /b 1
-)
+  sonar-tag-required:
+    message: "Every operation must have at least one tag"
+    severity: error
+    given: "$.paths[*][get,post,put,patch,delete,head,options,trace]"
+    then:
+      field: tags
+      function: truthy
 
-REM -- Defaults ----------------------------------------------------------------
-if "%BASE_BRANCH%"==""              set "BASE_BRANCH=main"
-if "%COMPARE_BRANCH%"==""           set "COMPARE_BRANCH=sonar-demo"
-if "%SPECTRAL_FAIL_ON_SEVERITY%"=="" set "SPECTRAL_FAIL_ON_SEVERITY=error"
-if "%SPECTRAL_RULESET_URL%"==""     set "SPECTRAL_RULESET_URL=https://raw.githubusercontent.com/%GITHUB_REPOSITORY%/main/spectral-rules.yaml"
+  sonar-operation-summary:
+    message: "Every operation must have a summary"
+    severity: error
+    given: "$.paths[*][get,post,put,patch,delete,head,options,trace]"
+    then:
+      field: summary
+      function: truthy
 
-set "GIT_TERMINAL_PROMPT=0"
-set "SAFE_REPO_URL=https://x-access-token:%GITHUB_TOKEN%@github.com/%GITHUB_REPOSITORY%.git"
-set "SWAGGERHUB_API=https://api.swaggerhub.com/apis"
+  sonar-operation-description:
+    message: "Every operation should have a description"
+    severity: warn
+    given: "$.paths[*][get,post,put,patch,delete,head,options,trace]"
+    then:
+      field: description
+      function: truthy
 
-REM -- Clean workspace ----------------------------------------------------------
-if exist repo              rmdir /s /q repo
-if exist sonar-reports     rmdir /s /q sonar-reports
-mkdir sonar-reports
+  # ── Response Codes ────────────────────────────────────────────────────────
+  sonar-get-must-have-200:
+    message: "GET operations must define a 200 response"
+    severity: error
+    given: "$.paths[*].get"
+    then:
+      field: "responses.200"
+      function: truthy
 
-echo ===================== Tool versions =====================
-where git  & git --version
-if !ERRORLEVEL! neq 0 ( echo ERROR: git not found. & exit /b 1 )
+  sonar-post-must-have-201-or-200:
+    message: "POST operations must define a 200 or 201 response"
+    severity: error
+    given: "$.paths[*].post"
+    then:
+      field: responses
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          anyOf:
+            - required: ["200"]
+            - required: ["201"]
 
-where node & node --version
-if !ERRORLEVEL! neq 0 ( echo ERROR: node not found. & exit /b 1 )
+  sonar-delete-must-have-204:
+    message: "DELETE operations should define a 204 response"
+    severity: warn
+    given: "$.paths[*].delete"
+    then:
+      field: "responses.204"
+      function: truthy
 
-where npm
-cmd /c npm --version
-if !ERRORLEVEL! neq 0 ( echo ERROR: npm not found. & exit /b 1 )
+  sonar-must-have-400:
+    message: "Operations should define a 400 Bad Request response"
+    severity: warn
+    given: "$.paths[*][get,post,put,patch,delete]"
+    then:
+      field: "responses.400"
+      function: truthy
 
-REM -- npm global path ----------------------------------------------------------
-for /f "delims=" %%p in ('cmd /c npm prefix -g 2^>nul') do set "NPM_GLOBAL_PREFIX=%%p"
-echo npm global prefix: !NPM_GLOBAL_PREFIX!
-set "PATH=!NPM_GLOBAL_PREFIX!;!NPM_GLOBAL_PREFIX!\node_modules\.bin;!PATH!"
+  sonar-must-have-401:
+    message: "Operations should define a 401 Unauthorized response"
+    severity: warn
+    given: "$.paths[*][get,post,put,patch,delete]"
+    then:
+      field: "responses.401"
+      function: truthy
 
-REM -- Install Spectral and js-yaml ---------------------------------------------
-echo ===================== Installing Spectral CLI =====================
-cmd /c npm config set strict-ssl false
-cmd /c npm install -g @stoplight/spectral-cli
-cmd /c npm install -g js-yaml
-cmd /c npm config set strict-ssl true
-if !ERRORLEVEL! neq 0 ( echo ERROR: Failed to install Spectral. & exit /b 1 )
+  sonar-must-have-500:
+    message: "Operations must define a 500 Internal Server Error response"
+    severity: error
+    given: "$.paths[*][get,post,put,patch,delete]"
+    then:
+      field: "responses.500"
+      function: truthy
 
-cmd /c spectral --version
-if !ERRORLEVEL! neq 0 ( echo ERROR: Spectral CLI not working. & exit /b 1 )
+  # ── Schema & Models ───────────────────────────────────────────────────────
+  sonar-no-inline-schemas-in-responses:
+    message: "Response schemas should use $ref rather than inline definitions"
+    severity: warn
+    given: "$.paths[*][*].responses[*].content[*].schema"
+    then:
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          required: ["$ref"]
 
-REM -- Verify GitHub access -----------------------------------------------------
-echo ===================== Testing GitHub access =====================
-git ls-remote "%SAFE_REPO_URL%" HEAD
-if !ERRORLEVEL! neq 0 ( echo ERROR: Cannot access GitHub repo. & exit /b 1 )
+  sonar-schema-description:
+    message: "Schema properties should have a description"
+    severity: warn
+    given: "$.components.schemas[*].properties[*]"
+    then:
+      field: description
+      function: truthy
 
-REM -- Clone & fetch ------------------------------------------------------------
-echo ===================== Cloning repository =====================
-git clone --progress "%SAFE_REPO_URL%" repo
-if !ERRORLEVEL! neq 0 ( echo ERROR: Clone failed. & exit /b 1 )
+  sonar-schema-example:
+    message: "Schema properties should include an example"
+    severity: warn
+    given: "$.components.schemas[*].properties[*]"
+    then:
+      field: example
+      function: truthy
 
-cd repo
+  # ── Security ──────────────────────────────────────────────────────────────
+  sonar-security-defined:
+    message: "Every operation must define a security requirement"
+    severity: error
+    given: "$.paths[*][get,post,put,patch,delete]"
+    then:
+      field: security
+      function: truthy
 
-git fetch origin "+refs/heads/%BASE_BRANCH%:refs/remotes/origin/%BASE_BRANCH%"
-if !ERRORLEVEL! neq 0 ( echo ERROR: Could not fetch base branch %BASE_BRANCH%. & exit /b 1 )
+  sonar-no-api-key-in-query:
+    message: "API keys must not be passed as query parameters (use header or cookie)"
+    severity: error
+    given: "$.components.securitySchemes[?(@.type == 'apiKey')]"
+    then:
+      field: in
+      function: pattern
+      functionOptions:
+        notMatch: "^query$"
 
-git fetch origin "+refs/heads/%COMPARE_BRANCH%:refs/remotes/origin/%COMPARE_BRANCH%"
-if !ERRORLEVEL! neq 0 ( echo ERROR: Could not fetch compare branch %COMPARE_BRANCH%. & exit /b 1 )
+  # ── OWASP overrides (severity promotions) ─────────────────────────────────
+  # Promote OWASP warnings to errors for gates
+  owasp:api1:2019-no-numeric-ids:
+    severity: error
 
-REM -- Resolve commits ----------------------------------------------------------
-set "BASE_COMMIT="
-for /f "delims=" %%i in ('git rev-parse "origin/%BASE_BRANCH%" 2^>nul') do set "BASE_COMMIT=%%i"
-if "!BASE_COMMIT!"=="" ( echo ERROR: Could not resolve base branch. & exit /b 1 )
+  owasp:api3:2019-define-error-responses-401:
+    severity: error
 
-set "CANDIDATE_COMMIT="
-if not "%GITHUB_SHA%"=="" (
-  git cat-file -e "%GITHUB_SHA%^{commit}" 2>nul
-  if !ERRORLEVEL! equ 0 (
-    set "CANDIDATE_COMMIT=%GITHUB_SHA%"
-    echo Resolved candidate from GITHUB_SHA.
-  )
-)
-if "!CANDIDATE_COMMIT!"=="" (
-  for /f "delims=" %%i in ('git rev-parse "origin/%COMPARE_BRANCH%" 2^>nul') do set "CANDIDATE_COMMIT=%%i"
-)
-if "!CANDIDATE_COMMIT!"=="" ( echo ERROR: Could not resolve candidate commit. & exit /b 1 )
+  owasp:api3:2019-define-error-responses-500:
+    severity: error
 
-echo Base commit:      !BASE_COMMIT!
-echo Candidate commit: !CANDIDATE_COMMIT!
+  owasp:api4:2019-rate-limit:
+    severity: error
 
-if "!BASE_COMMIT!"=="!CANDIDATE_COMMIT!" (
-  echo ERROR: Base and candidate commits are identical - nothing to check.
-  exit /b 1
-)
-
-REM -- Extract spec files -------------------------------------------------------
-echo ===================== Extracting spec versions =====================
-git ls-tree -r "!CANDIDATE_COMMIT!" -- "%SPEC_PATH%" | findstr /c:"%SPEC_PATH%" >nul
-if !ERRORLEVEL! neq 0 ( echo ERROR: %SPEC_PATH% not found in candidate commit. & exit /b 1 )
-
-git show "!CANDIDATE_COMMIT!:%SPEC_PATH%" > ..\sonar-reports\current.yaml
-if !ERRORLEVEL! neq 0 ( echo ERROR: Could not extract candidate spec. & exit /b 1 )
-
-REM Check if baseline exists on the base branch (may be a brand-new spec)
-set "HAS_BASELINE=0"
-git ls-tree -r "!BASE_COMMIT!" -- "%SPEC_PATH%" | findstr /c:"%SPEC_PATH%" >nul
-if !ERRORLEVEL! equ 0 (
-  git show "!BASE_COMMIT!:%SPEC_PATH%" > ..\sonar-reports\baseline.yaml
-  if !ERRORLEVEL! equ 0 set "HAS_BASELINE=1"
-)
-if "!HAS_BASELINE!"=="0" echo NOTICE: No baseline spec found on %BASE_BRANCH% - skipping diff step.
-
-cd ..
-
-echo ===================== File sizes =====================
-dir sonar-reports
-
-REM -- Download Spectral ruleset ------------------------------------------------
-echo ===================== Fetching Spectral ruleset =====================
-echo Ruleset URL: %SPECTRAL_RULESET_URL%
-curl -sS -L -o sonar-reports\spectral-rules.yaml "%SPECTRAL_RULESET_URL%"
-if !ERRORLEVEL! neq 0 (
-  echo ERROR: Could not fetch Spectral ruleset from %SPECTRAL_RULESET_URL%.
-  exit /b 1
-)
-echo Ruleset downloaded.
-
-REM -- Copy override-generator script -------------------------------------------
-set "SCRIPT_DIR=%~dp0"
-if exist "!SCRIPT_DIR!generate-spectral-overrides.js" (
-  copy /y "!SCRIPT_DIR!generate-spectral-overrides.js" sonar-reports\generate-spectral-overrides.js >nul
-) else if exist "repo\generate-spectral-overrides.js" (
-  copy /y repo\generate-spectral-overrides.js sonar-reports\generate-spectral-overrides.js >nul
-) else (
-  echo ERROR: generate-spectral-overrides.js not found. Add it to the repo root or alongside this script.
-  exit /b 1
-)
-
-REM -- Generate combined ruleset with native Spectral overrides -----------------
-REM Reads x-spectral-exemptions from the spec and emits a ruleset that extends
-REM the base rules and adds overrides { files: ["current.yaml#/paths/..."], rules: { rule: "off" } }
-echo ===================== Generating override ruleset from x-spectral-exemptions =====================
-set "NODE_PATH=!NPM_GLOBAL_PREFIX!\node_modules"
-node sonar-reports\generate-spectral-overrides.js ^
-  sonar-reports\current.yaml ^
-  sonar-reports\spectral-rules.yaml ^
-  sonar-reports\spectral-combined.yaml
-if !ERRORLEVEL! neq 0 (
-  echo ERROR: Failed to generate combined ruleset.
-  exit /b 1
-)
-echo Combined ruleset written to sonar-reports\spectral-combined.yaml
-
-REM -- Run Spectral with combined ruleset ---------------------------------------
-echo ===================== Running Spectral lint =====================
-cmd /c spectral lint sonar-reports\current.yaml ^
-  --ruleset sonar-reports\spectral-combined.yaml ^
-  --format json ^
-  --output sonar-reports\spectral-results.json
-set "FILTER_EXIT=!ERRORLEVEL!"
-echo Spectral exit code: !FILTER_EXIT!
-
-REM -- Human-readable text report -----------------------------------------------
-echo ===================== Generating text report =====================
-cmd /c spectral lint sonar-reports\current.yaml ^
-  --ruleset sonar-reports\spectral-combined.yaml ^
-  --format text > sonar-reports\spectral-report.txt 2>&1
-type sonar-reports\spectral-report.txt
-
-REM -- Decide gate --------------------------------------------------------------
-echo ===================== Quality gate =====================
-echo SPECTRAL_FAIL_ON_SEVERITY=%SPECTRAL_FAIL_ON_SEVERITY%
-echo Spectral exit code (0=pass, 1=issues found): !FILTER_EXIT!
-
-if "!FILTER_EXIT!"=="0" (
-  echo Quality gate PASSED - no issues after applying x-spectral-exemptions overrides.
-  goto :reports_done
-)
-
-REM -- FAILED: attempt SwaggerHub rollback -------------------------------------
-echo.
-echo ===================== GATE FAILED - initiating SwaggerHub rollback =====================
-echo Spectral detected errors in the candidate spec.
-
-REM 1. Fetch the list of versions for this API
-echo Fetching API version list from SwaggerHub...
-curl -sS -H "Authorization: %SWAGGERHUB_API_KEY%" ^
-  "%SWAGGERHUB_API%/%SWAGGER_OWNER%/%SWAGGER_API_NAME%" ^
-  -o sonar-reports\swaggerhub-versions.json
-if !ERRORLEVEL! neq 0 (
-  echo ERROR: Could not retrieve API versions from SwaggerHub.
-  exit /b 1
-)
-
-REM 2. Extract the two most-recent versions (current and the one before it)
-for /f "delims=" %%v in ('node -e "const d=require('./sonar-reports/swaggerhub-versions.json');const versions=d.apis.map(a=>a.properties.find(p=>p.type==='X-Version').value).sort((a,b)=>b.localeCompare(a,undefined,{numeric:true,sensitivity:'base'}));process.stdout.write(versions[0]||'')"') do set "CURRENT_VERSION=%%v"
-
-for /f "delims=" %%v in ('node -e "const d=require('./sonar-reports/swaggerhub-versions.json');const versions=d.apis.map(a=>a.properties.find(p=>p.type==='X-Version').value).sort((a,b)=>b.localeCompare(a,undefined,{numeric:true,sensitivity:'base'}));process.stdout.write(versions[1]||'')"') do set "ROLLBACK_VERSION=%%v"
-
-echo Current version:  !CURRENT_VERSION!
-echo Rollback version: !ROLLBACK_VERSION!
-
-if "!ROLLBACK_VERSION!"=="" (
-  echo ERROR: No previous version found to roll back to.
-  exit /b 1
-)
-
-if "!CURRENT_VERSION!"=="!ROLLBACK_VERSION!" (
-  echo ERROR: Current and rollback versions are the same - cannot roll back.
-  exit /b 1
-)
-
-REM 3. Fetch the previous version's spec content
-echo Fetching previous version spec (%ROLLBACK_VERSION%)...
-curl -sS -H "Authorization: %SWAGGERHUB_API_KEY%" ^
-  -H "Accept: application/yaml" ^
-  "%SWAGGERHUB_API%/%SWAGGER_OWNER%/%SWAGGER_API_NAME%/%ROLLBACK_VERSION%" ^
-  -o sonar-reports\rollback-spec.yaml
-if !ERRORLEVEL! neq 0 (
-  echo ERROR: Could not fetch rollback spec from SwaggerHub.
-  exit /b 1
-)
-
-REM 4. Save the spec back as the current version (overwrite) using PUT
-echo Rolling back version !CURRENT_VERSION! to content from !ROLLBACK_VERSION!...
-curl -sS -X PUT ^
-  -H "Authorization: %SWAGGERHUB_API_KEY%" ^
-  -H "Content-Type: application/yaml" ^
-  -H "Accept: application/json" ^
-  --data-binary "@sonar-reports\rollback-spec.yaml" ^
-  "%SWAGGERHUB_API%/%SWAGGER_OWNER%/%SWAGGER_API_NAME%/%CURRENT_VERSION%" ^
-  -o sonar-reports\rollback-response.json
-set "ROLLBACK_EXIT=!ERRORLEVEL!"
-
-type sonar-reports\rollback-response.json
-if "!ROLLBACK_EXIT!"=="0" (
-  echo SwaggerHub version !CURRENT_VERSION! has been rolled back to content from !ROLLBACK_VERSION!.
-) else (
-  echo ERROR: SwaggerHub rollback PUT request failed.
-)
-
-echo.
-echo ===================== Final reports =====================
-dir sonar-reports
-
-echo.
-echo PIPELINE RESULT: FAILED - breaking Spectral issues detected and SwaggerHub rollback executed.
-exit /b 1
-
-:reports_done
-echo ===================== Final reports =====================
-dir sonar-reports
-echo.
-echo PIPELINE RESULT: PASSED - API spec meets all Spectral governance rules.
-exit /b 0
-
+  owasp:api7:2019-security-hosts-https-oas3:
+    severity: error
